@@ -78,7 +78,26 @@ public class ReelService extends AccessibilityService {
     final long[] nextAt = new long[Prefs.ACTIONS.length];
     long lastActionEnd;
     int lastCommentIdx = -1;
-    boolean wasOutside;
+    long pausedAt;
+    boolean lastReels = true;
+
+    /**
+     * Корень окна Instagram, если он сейчас верхнее приложение.
+     * Системные окошки и предупреждения поверх (не приложения) не считаются, чтобы не сбивать таймер.
+     */
+    AccessibilityNodeInfo igRoot() {
+        try {
+            for (AccessibilityWindowInfo w : getWindows()) {
+                if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                AccessibilityNodeInfo r = w.getRoot();
+                if (r == null || r.getPackageName() == null) continue;
+                if (getPackageName().contentEquals(r.getPackageName())) continue;
+                return IG.contentEquals(r.getPackageName()) ? r : null; // первое сверху окно приложения
+            }
+        } catch (Throwable ignored) { }
+        AccessibilityNodeInfo r = getRootInActiveWindow();
+        return r != null && r.getPackageName() != null && IG.contentEquals(r.getPackageName()) ? r : null;
+    }
 
     @Override
     protected void onServiceConnected() {
@@ -173,6 +192,7 @@ public class ReelService extends AccessibilityService {
         lastActionEnd = now;
         shotFails = 0;
         shotsOk = Build.VERSION.SDK_INT >= 30;
+        pausedAt = 0;
         resetReel();
         Journal.add("Старт" + (p.selfScroll() ? "" : " (листает сам Instagram, я только делаю действия)"));
         h.removeCallbacks(tick);
@@ -200,16 +220,30 @@ public class ReelService extends AccessibilityService {
         long now = SystemClock.elapsedRealtime();
         if (busy || swiping) return;
 
-        AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (root == null || !IG.contentEquals(root.getPackageName() == null ? "" : root.getPackageName())) {
+        AccessibilityNodeInfo root = igRoot();
+        if (root == null) {
+            // Instagram закрыт или поверх открыто другое приложение: ставим ролик на паузу, а не сбрасываем
+            if (pausedAt == 0) pausedAt = now;
             updateButton("■ Стоп (жду Instagram)");
-            wasOutside = true;
             return;
         }
-        if (wasOutside) { wasOutside = false; resetReel(); }
+        if (pausedAt != 0) {
+            long away = now - pausedAt;
+            pausedAt = 0;
+            if (away > 60000) resetReel();
+            else { reelStart += away; lastShot = now; }
+        }
+        boolean reels = find(root, new Match() {
+            public boolean ok(AccessibilityNodeInfo x) {
+                String id = x.getViewIdResourceName();
+                return id != null && id.contains("clips");
+            }
+        }) != null;
+        if (reels != lastReels) { lastReels = reels; Journal.add(reels ? "Вижу Reels" : "Не вижу Reels — открой вкладку Reels (значок с видео внизу)"); }
 
         long watched = now - reelStart;
-        updateButton("■ Стоп  " + (watched / 60000) + ":" + String.format("%02d", (watched / 1000) % 60));
+        updateButton("■ Стоп  " + (watched / 60000) + ":" + String.format("%02d", (watched / 1000) % 60)
+                + (reels ? "" : "\nоткрой Reels"));
 
         // 1) Действия по случайному таймеру
         if (watched > 3000 && now - lastActionEnd > 15000) {
