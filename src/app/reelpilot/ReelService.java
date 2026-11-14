@@ -655,6 +655,8 @@ public class ReelService extends AccessibilityService {
         String s = b.toString();
         if (s.length() > 60000) s = s.substring(0, 60000);
         Journal.lastDump = s;
+        for (int i = 0; i < s.length(); i += 3000)
+            android.util.Log.i("ReelPilotDump", s.substring(i, Math.min(s.length(), i + 3000)));
         Journal.add("Экран записан (" + s.length() + " символов). Открой приложение → «Скопировать отчёт».");
         Toast.makeText(this, "Экран записан", Toast.LENGTH_SHORT).show();
     }
