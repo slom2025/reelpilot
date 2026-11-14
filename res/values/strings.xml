@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Рилс Пилот</string>
+    <string name="acc_desc">Листает Reels в Instagram: досматривает ролик до конца и переходит к следующему, иногда ставит лайк, репост и комментарий из твоего списка. Работает только когда ты нажал кнопку «Старт».</string>
+</resources>
