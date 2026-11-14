@@ -12,7 +12,6 @@ import android.os.Looper;
 import android.provider.Settings;
 import android.widget.Toast;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
@@ -22,12 +21,12 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 
 /**
- * Обновление из GitHub Releases: смотрим последний релиз, сравниваем номер версии,
+ * Обновление из папки release/ в GitHub: читаем version.json, сравниваем номер версии,
  * скачиваем APK и отдаём системе на установку (она спросит «Обновить?»).
  */
 public class Updater {
     public static final String REPO = "slom2025/reelpilot";
-    static final String API = "https://api.github.com/repos/" + REPO + "/releases/latest";
+    static final String BASE = "https://raw.githubusercontent.com/" + REPO + "/main/release/";
     public static final String ACTION_INSTALL_STATUS = "app.reelpilot.INSTALL_STATUS";
 
     public interface Ui { void status(String s); }
@@ -53,21 +52,14 @@ public class Updater {
         new Thread(new Runnable() {
             public void run() {
                 try {
-                    JSONObject rel = new JSONObject(new String(get(API), "UTF-8"));
-                    String tag = rel.optString("tag_name", "");      // например "v3"
-                    int remote = Integer.parseInt(tag.replaceAll("[^0-9]", ""));
+                    JSONObject rel = new JSONObject(new String(get(BASE + "version.json?t=" + System.currentTimeMillis()), "UTF-8"));
+                    int remote = rel.getInt("versionCode");
                     int mine = myVersion();
-                    if (remote <= mine) { if (!quiet) say("У тебя последняя версия (" + mine + ")"); return; }
-                    String apkUrl = null;
-                    JSONArray assets = rel.getJSONArray("assets");
-                    for (int i = 0; i < assets.length(); i++) {
-                        JSONObject a = assets.getJSONObject(i);
-                        if (a.getString("name").endsWith(".apk")) apkUrl = a.getString("browser_download_url");
-                    }
-                    if (apkUrl == null) { if (!quiet) say("В новой версии нет файла APK"); return; }
-                    String notes = rel.optString("body", "").trim();
+                    if (remote <= mine) { if (!quiet) say("У тебя последняя версия (" + rel.optString("versionName", "" + remote) + ")"); return; }
+                    String apkUrl = BASE + rel.optString("apk", "ReelPilot.apk");
+                    String notes = rel.optString("notes", "").trim();
                     if (!install) {
-                        say("Есть новая версия " + remote + "! Нажми «Проверить обновления», чтобы поставить."
+                        say("Есть новая версия " + rel.optString("versionName", "" + remote) + "! Нажми «Проверить обновления», чтобы поставить."
                                 + (notes.length() > 0 ? "\nЧто нового: " + notes : ""));
                         return;
                     }
