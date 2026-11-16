@@ -237,10 +237,19 @@ public class ReelService extends AccessibilityService {
         boolean reels = find(root, new Match() {
             public boolean ok(AccessibilityNodeInfo x) {
                 String id = x.getViewIdResourceName();
-                return id != null && id.contains("clips");
+                return id != null && id.endsWith("/clips_viewer_view_pager") && x.isVisibleToUser();
             }
         }) != null;
-        if (reels != lastReels) { lastReels = reels; Journal.add(reels ? "Вижу Reels" : "Не вижу Reels — открой вкладку Reels (значок с видео внизу)"); }
+        if (reels != lastReels) { lastReels = reels; Journal.add(reels ? "Вижу Reels" : "Не вижу Reels"); }
+        if (!reels) {
+            // В ленте и других разделах ничего не делаем: возвращаемся в Reels
+            busy = true;
+            new Thread(new Runnable() { public void run() {
+                try { ensureReels(); } catch (Throwable ignored) { }
+                h.post(new Runnable() { public void run() { resetReel(); busy = false; } });
+            } }).start();
+            return;
+        }
 
         if (closePopup(root)) return;
 
@@ -479,14 +488,12 @@ public class ReelService extends AccessibilityService {
             public boolean ok(AccessibilityNodeInfo x) {
                 String s = label(x);
                 String id = x.getViewIdResourceName();
-                if (id != null && id.contains("repost")) s = s + " repost";
-                return (s.contains("repost") || s.contains("репост"))
-                        && !s.contains("remove") && !s.contains("undo") && !s.contains("отмен") && !s.contains("удал")
-                        && !x.isSelected() && x.isVisibleToUser();
+                if (id != null && id.contains("count")) return false; // «2763 репостов» — это счётчик, не кнопка
+                return x.isVisibleToUser() && !x.isSelected() && (s.equals("репост") || s.equals("repost"));
             }
         });
         if (b == null) { Journal.add("Репост: кнопка не найдена (нажми долго на плавающую кнопку на рилсе — запишу экран для настройки)"); return; }
-        click(b);
+        tap(b);
         sleep(1500);
         // В некоторых версиях после нажатия появляется окошко подтверждения
         AccessibilityNodeInfo confirm = findAll(new Match() {
@@ -499,6 +506,7 @@ public class ReelService extends AccessibilityService {
         if (confirm != null) { click(confirm); sleep(1000); }
         sleep(1500);
         closePopup(null);
+        if (shareSheetOpen()) { Journal.add("Репост: открылось «Поделиться», закрываю"); performGlobalAction(GLOBAL_ACTION_BACK); sleep(1200); ensureReels(); return; }
         Journal.add("🔁 Репост");
     }
 
@@ -595,14 +603,54 @@ public class ReelService extends AccessibilityService {
     }
 
     void closeSheet() {
-        // Окно точно открыто (мы его открыли) — один «Назад» обязательно,
-        // дальше ещё максимум два, пока видно поле ввода или клавиатуру.
         performGlobalAction(GLOBAL_ACTION_BACK);
-        sleep(1200);
-        for (int i = 0; i < 2; i++) {
-            if (findInput() == null && !keyboardShown()) return;
-            performGlobalAction(GLOBAL_ACTION_BACK);
-            sleep(1200);
+        sleep(1300);
+        if (findInput() != null && !inReels()) { performGlobalAction(GLOBAL_ACTION_BACK); sleep(1300); }
+        ensureReels();
+    }
+
+    /** На экране лента Reels (а не окно комментариев, «Поделиться» или главная лента). */
+    boolean inReels() {
+        AccessibilityNodeInfo r = igRoot();
+        if (r == null) return false;
+        return find(r, new Match() {
+            public boolean ok(AccessibilityNodeInfo x) {
+                String id = x.getViewIdResourceName();
+                return id != null && id.endsWith("/clips_viewer_view_pager") && x.isVisibleToUser();
+            }
+        }) != null && findInput() == null && !shareSheetOpen();
+    }
+
+    boolean shareSheetOpen() {
+        return findAll(new Match() {
+            public boolean ok(AccessibilityNodeInfo x) {
+                String s = label(x);
+                return x.isVisibleToUser() && (s.equals("копировать") || s.equals("копировать ссылку") || s.equals("copy link") || s.equals("whatsapp"));
+            }
+        }) != null;
+    }
+
+    /** Если ушли из Reels — возвращаемся: открываем Instagram и жмём вкладку Reels. */
+    void ensureReels() {
+        for (int attempt = 0; attempt < 3; attempt++) {
+            if (inReels()) return;
+            AccessibilityNodeInfo r = igRoot();
+            if (r == null) {
+                Journal.add("Вышли из Instagram — открываю обратно");
+                android.content.Intent i = getPackageManager().getLaunchIntentForPackage(IG);
+                if (i != null) { i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK); startActivity(i); }
+                sleep(3000);
+                continue;
+            }
+            AccessibilityNodeInfo tab = find(r, new Match() {
+                public boolean ok(AccessibilityNodeInfo x) {
+                    String id = x.getViewIdResourceName();
+                    return id != null && id.endsWith("/clips_tab");
+                }
+            });
+            if (tab != null) { Journal.add("Возвращаюсь во вкладку Reels"); tap(tab); sleep(2500); continue; }
+            performGlobalAction(GLOBAL_ACTION_BACK); // окно поверх — закрываем
+            sleep(1300);
         }
     }
 
@@ -643,7 +691,7 @@ public class ReelService extends AccessibilityService {
             seen++;
             if (n == null) continue;
             if (m.ok(n)) return n;
-            for (int i = 0; i < n.getChildCount(); i++) q.add(n.getChild(i));
+            for (int i = 0; i < n.getChildCount(); i++) { AccessibilityNodeInfo c = n.getChild(i); if (c != null) q.add(c); }
         }
         return null;
     }
@@ -659,6 +707,15 @@ public class ReelService extends AccessibilityService {
             }
         } catch (Throwable ignored) { }
         return find(getRootInActiveWindow(), m);
+    }
+
+    /** Тап по центру самого элемента (не по родителю). */
+    void tap(AccessibilityNodeInfo n) {
+        android.graphics.Rect r = new android.graphics.Rect();
+        n.getBoundsInScreen(r);
+        Path path = new Path();
+        path.moveTo(r.exactCenterX(), r.exactCenterY());
+        gesture(path, 0, 60);
     }
 
     void click(AccessibilityNodeInfo n) {
