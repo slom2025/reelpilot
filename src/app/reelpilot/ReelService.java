@@ -462,6 +462,8 @@ public class ReelService extends AccessibilityService {
         AccessibilityNodeInfo b = findAll(new Match() {
             public boolean ok(AccessibilityNodeInfo x) {
                 String s = label(x);
+                String id = x.getViewIdResourceName();
+                if (id != null && id.contains("repost")) s = s + " repost";
                 return (s.contains("repost") || s.contains("репост"))
                         && !s.contains("remove") && !s.contains("undo") && !s.contains("отмен") && !s.contains("удал")
                         && !x.isSelected() && x.isVisibleToUser();
@@ -486,6 +488,8 @@ public class ReelService extends AccessibilityService {
         AccessibilityNodeInfo b = findAll(new Match() {
             public boolean ok(AccessibilityNodeInfo x) {
                 String s = label(x);
+                String id = x.getViewIdResourceName();
+                if (id != null && id.endsWith("/comment_button")) return x.isVisibleToUser();
                 return x.isVisibleToUser() && (s.equals("comment") || s.equals("комментарий") || s.equals("комментировать")
                         || s.equals("comments") || s.equals("комментарии"));
             }

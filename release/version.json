@@ -1,6 +1,6 @@
 {
- "versionCode": 5,
- "versionName": "1.4",
+ "versionCode": 6,
+ "versionName": "1.5",
  "apk": "ReelPilot.apk",
- "notes": "Запись экрана для отладки также в журнал Android"
+ "notes": "Кнопка комментариев ищется по точному названию в Instagram"
 }
