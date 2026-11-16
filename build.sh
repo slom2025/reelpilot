@@ -5,7 +5,7 @@ FW=/usr/share/android-framework-res/framework-res.apk
 BOOT=/root/sdk/android-all.jar
 rm -rf build && mkdir -p build/gen build/classes
 aapt package -f -m -J build/gen -M AndroidManifest.xml -S res -I $FW \
-  --min-sdk-version 24 --target-sdk-version 34 --version-code 7 --version-name 1.6 \
+  --min-sdk-version 24 --target-sdk-version 34 --version-code 8 --version-name 1.7 \
   -F build/app.unsigned.apk
 javac -nowarn -Xlint:-options --release 8 -classpath $BOOT -encoding UTF-8 -d build/classes \
   $(find build/gen src -name '*.java')

@@ -213,7 +213,7 @@ public class ReelService extends AccessibilityService {
         public void run() {
             if (!running) return;
             h.postDelayed(this, 500);
-            try { step(); } catch (Throwable t) { Journal.add("Ошибка: " + t); }
+            try { step(); } catch (Throwable t) { Journal.add("Ошибка: " + t + " @ " + (t.getStackTrace().length > 0 ? t.getStackTrace()[0] : "")); }
         }
     };
 
@@ -241,6 +241,8 @@ public class ReelService extends AccessibilityService {
             }
         }) != null;
         if (reels != lastReels) { lastReels = reels; Journal.add(reels ? "Вижу Reels" : "Не вижу Reels — открой вкладку Reels (значок с видео внизу)"); }
+
+        if (closePopup(root)) return;
 
         long watched = now - reelStart;
         updateButton("■ Стоп  " + (watched / 60000) + ":" + String.format("%02d", (watched / 1000) % 60)
@@ -317,7 +319,12 @@ public class ReelService extends AccessibilityService {
         AccessibilityNodeInfo n = find(root, new Match() {
             public boolean ok(AccessibilityNodeInfo x) {
                 AccessibilityNodeInfo.RangeInfo r = x.getRangeInfo();
-                return r != null && r.getMax() > r.getMin();
+                if (r == null || r.getMax() <= r.getMin() || !x.isVisibleToUser()) return false;
+                // В ленте Reels соседние ролики тоже есть в дереве: берём только полосу на экране
+                android.graphics.Rect b = new android.graphics.Rect();
+                x.getBoundsInScreen(b);
+                int[] wh = screen();
+                return b.left >= 0 && b.right <= wh[0] && b.top >= 0 && b.bottom <= wh[1] && b.width() > wh[0] / 3;
             }
         });
         if (n == null) return false;
@@ -443,7 +450,7 @@ public class ReelService extends AccessibilityService {
                     else if (a.equals("readc")) doComments(false);
                     else if (a.equals("writec")) doComments(true);
                 } catch (Throwable t) {
-                    Journal.add("Ошибка действия: " + t);
+                    Journal.add("Ошибка действия: " + t + " @ " + (t.getStackTrace().length > 0 ? t.getStackTrace()[0] : ""));
                 } finally {
                     lastActionEnd = SystemClock.elapsedRealtime();
                     busy = false;
@@ -490,6 +497,8 @@ public class ReelService extends AccessibilityService {
             }
         });
         if (confirm != null) { click(confirm); sleep(1000); }
+        sleep(1500);
+        closePopup(null);
         Journal.add("🔁 Репост");
     }
 
@@ -570,12 +579,39 @@ public class ReelService extends AccessibilityService {
     }
 
     /** Закрываем окно комментариев кнопкой «Назад» (не больше 3 раз, чтобы не уйти из Reels). */
+    /** Окошки Instagram вроде «Вы сделали репост…»: жмём «Закрыть» (никогда не «Отменить»). */
+    boolean closePopup(AccessibilityNodeInfo root) {
+        AccessibilityNodeInfo b = findAll(new Match() {
+            public boolean ok(AccessibilityNodeInfo x) {
+                String id = x.getViewIdResourceName();
+                return id != null && id.endsWith("/igds_headline_primary_action_button") && x.isVisibleToUser()
+                        && "закрыть".equals(label(x)) ;
+            }
+        });
+        if (b == null) return false;
+        click(b);
+        Journal.add("Закрыл окошко Instagram");
+        return true;
+    }
+
     void closeSheet() {
-        for (int i = 0; i < 3; i++) {
-            if (findInput() == null) return;
+        // Окно точно открыто (мы его открыли) — один «Назад» обязательно,
+        // дальше ещё максимум два, пока видно поле ввода или клавиатуру.
+        performGlobalAction(GLOBAL_ACTION_BACK);
+        sleep(1200);
+        for (int i = 0; i < 2; i++) {
+            if (findInput() == null && !keyboardShown()) return;
             performGlobalAction(GLOBAL_ACTION_BACK);
-            sleep(1000);
+            sleep(1200);
         }
+    }
+
+    boolean keyboardShown() {
+        try {
+            for (AccessibilityWindowInfo w : getWindows())
+                if (w.getType() == AccessibilityWindowInfo.TYPE_INPUT_METHOD) return true;
+        } catch (Throwable ignored) { }
+        return false;
     }
 
     AccessibilityNodeInfo findInput() {
