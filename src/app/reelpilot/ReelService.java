@@ -242,7 +242,8 @@ public class ReelService extends AccessibilityService {
         }) != null;
         if (reels != lastReels) { lastReels = reels; Journal.add(reels ? "Вижу Reels" : "Не вижу Reels"); }
         if (!reels) {
-            // В ленте и других разделах ничего не делаем: возвращаемся в Reels
+            // В ленте и других разделах ничего не делаем: возвращаемся в Reels (не чаще раза в 10 с)
+            if (now - lastEnsure < 10000) return;
             busy = true;
             new Thread(new Runnable() { public void run() {
                 try { ensureReels(); } catch (Throwable ignored) { }
@@ -523,7 +524,7 @@ public class ReelService extends AccessibilityService {
         if (b == null) { Journal.add("Комменты: кнопка не найдена"); return; }
         click(b);
         sleep(2200);
-        if (findInput() == null) { Journal.add("Комменты: окно не открылось"); return; }
+        if (reelButtonsVisible() && findInput() == null) { Journal.add("Комменты: окно не открылось"); return; }
 
         // Листаем комментарии
         int scrolls = 2 + rnd.nextInt(3);
@@ -549,10 +550,16 @@ public class ReelService extends AccessibilityService {
 
     void postComment(String text) {
         AccessibilityNodeInfo in = findInput();
-        if (in == null) { Journal.add("Комментарий: нет поля ввода"); return; }
-        click(in);
-        sleep(1200);
+        if (in != null) click(in);
+        else {
+            // Поле внизу шторки службе не видно — тапаем туда, где оно обычно есть
+            int[] wh = screen();
+            Path pth = new Path(); pth.moveTo(wh[0] * 0.4f, wh[1] * 0.93f);
+            gesture(pth, 0, 60);
+        }
+        sleep(1500);
         in = findInput();
+        if (in == null) in = findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
         if (in == null) { Journal.add("Комментарий: поле ввода пропало"); return; }
         Bundle args = new Bundle();
         args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
@@ -572,21 +579,14 @@ public class ReelService extends AccessibilityService {
     }
 
     void scrollComments() {
-        AccessibilityNodeInfo list = findAll(new Match() {
-            public boolean ok(AccessibilityNodeInfo x) {
-                String c = String.valueOf(x.getClassName());
-                return x.isScrollable() && x.isVisibleToUser() && (c.contains("RecyclerView") || c.contains("ListView"));
-            }
-        });
-        if (list != null && list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) return;
+        // Только жестом: список комментариев не виден службе, а «прокрутить список» может задеть скрытую ленту
         int[] wh = screen();
         Path path = new Path();
-        path.moveTo(wh[0] * 0.5f, wh[1] * 0.80f);
-        path.lineTo(wh[0] * 0.5f, wh[1] * 0.60f);
-        gesture(path, 0, 400);
+        path.moveTo(wh[0] * 0.5f, wh[1] * 0.82f);
+        path.lineTo(wh[0] * 0.5f, wh[1] * 0.58f);
+        gesture(path, 0, 450);
     }
 
-    /** Закрываем окно комментариев кнопкой «Назад» (не больше 3 раз, чтобы не уйти из Reels). */
     /** Окошки Instagram вроде «Вы сделали репост…»: жмём «Закрыть» (никогда не «Отменить»). */
     boolean closePopup(AccessibilityNodeInfo root) {
         AccessibilityNodeInfo b = findAll(new Match() {
@@ -603,23 +603,45 @@ public class ReelService extends AccessibilityService {
     }
 
     void closeSheet() {
-        performGlobalAction(GLOBAL_ACTION_BACK);
+        // Шторка комментариев не видна службе, поэтому ориентируемся на кнопки ролика:
+        // пока шторка открыта, «Нравится»/«Комментарий» закрыты ею.
+        for (int i = 0; i < 2; i++) {
+            if (reelButtonsVisible()) return;
+            performGlobalAction(GLOBAL_ACTION_BACK);
+            sleep(1300);
+        }
+        if (reelButtonsVisible()) return;
+        int[] wh = screen();
+        Path path = new Path();
+        path.moveTo(wh[0] * 0.5f, wh[1] * 0.40f);
+        path.lineTo(wh[0] * 0.5f, wh[1] * 0.95f);
+        gesture(path, 0, 350); // смахиваем шторку вниз
         sleep(1300);
-        if (findInput() != null && !inReels()) { performGlobalAction(GLOBAL_ACTION_BACK); sleep(1300); }
-        ensureReels();
+        if (!reelButtonsVisible()) Journal.add("Комменты: не получилось закрыть шторку");
     }
 
-    /** На экране лента Reels (а не окно комментариев, «Поделиться» или главная лента). */
-    boolean inReels() {
+    /** Видны кнопки текущего ролика (значит, поверх ничего не открыто). */
+    boolean reelButtonsVisible() {
         AccessibilityNodeInfo r = igRoot();
-        if (r == null) return false;
-        return find(r, new Match() {
+        return r != null && find(r, new Match() {
+            public boolean ok(AccessibilityNodeInfo x) {
+                String id = x.getViewIdResourceName();
+                return id != null && (id.endsWith("/comment_button") || id.endsWith("/like_button")) && x.isVisibleToUser();
+            }
+        }) != null;
+    }
+
+    boolean pagerVisible() {
+        AccessibilityNodeInfo r = igRoot();
+        return r != null && find(r, new Match() {
             public boolean ok(AccessibilityNodeInfo x) {
                 String id = x.getViewIdResourceName();
                 return id != null && id.endsWith("/clips_viewer_view_pager") && x.isVisibleToUser();
             }
-        }) != null && findInput() == null && !shareSheetOpen();
+        }) != null;
     }
+
+    boolean inReels() { return pagerVisible() && !shareSheetOpen(); }
 
     boolean shareSheetOpen() {
         return findAll(new Match() {
@@ -630,27 +652,24 @@ public class ReelService extends AccessibilityService {
         }) != null;
     }
 
-    /** Если ушли из Reels — возвращаемся: открываем Instagram и жмём вкладку Reels. */
+    long lastEnsure;
+
+    /** Если ушли из Reels внутри Instagram — жмём вкладку Reels. Instagram сами не открываем (вдруг звонок). */
     void ensureReels() {
-        for (int attempt = 0; attempt < 3; attempt++) {
+        lastEnsure = SystemClock.elapsedRealtime();
+        for (int attempt = 0; attempt < 2; attempt++) {
             if (inReels()) return;
             AccessibilityNodeInfo r = igRoot();
-            if (r == null) {
-                Journal.add("Вышли из Instagram — открываю обратно");
-                android.content.Intent i = getPackageManager().getLaunchIntentForPackage(IG);
-                if (i != null) { i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK); startActivity(i); }
-                sleep(3000);
-                continue;
-            }
+            if (r == null) return; // Instagram не на экране: просто ждём
+            if (shareSheetOpen()) { performGlobalAction(GLOBAL_ACTION_BACK); sleep(1300); continue; }
             AccessibilityNodeInfo tab = find(r, new Match() {
                 public boolean ok(AccessibilityNodeInfo x) {
                     String id = x.getViewIdResourceName();
                     return id != null && id.endsWith("/clips_tab");
                 }
             });
-            if (tab != null) { Journal.add("Возвращаюсь во вкладку Reels"); tap(tab); sleep(2500); continue; }
-            performGlobalAction(GLOBAL_ACTION_BACK); // окно поверх — закрываем
-            sleep(1300);
+            if (tab != null && !tab.isSelected()) { Journal.add("Возвращаюсь во вкладку Reels"); tap(tab); sleep(2500); continue; }
+            return; // вкладка Reels уже выбрана — ничего не жмём, чтобы не уйти дальше
         }
     }
 
