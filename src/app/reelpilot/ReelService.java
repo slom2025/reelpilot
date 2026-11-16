@@ -66,6 +66,7 @@ public class ReelService extends AccessibilityService {
     int matchStreak;
     float lastDist = -1;
     float prevProgress = -1;
+    float firstProgress = -1;
     boolean progressSeen;
 
     // Скриншоты для определения конца ролика
@@ -287,6 +288,7 @@ public class ReelService extends AccessibilityService {
         diverged = false;
         matchStreak = 0;
         prevProgress = -1;
+        firstProgress = -1;
         progressSeen = false;
     }
 
@@ -321,8 +323,15 @@ public class ReelService extends AccessibilityService {
         if (n == null) return false;
         AccessibilityNodeInfo.RangeInfo r = n.getRangeInfo();
         float v = (r.getCurrent() - r.getMin()) / (r.getMax() - r.getMin());
-        if (!progressSeen) { progressSeen = true; Journal.add("Нашёл полосу прогресса ролика"); }
-        boolean ended = v >= 0.985f || (prevProgress > 0.8f && v < 0.2f);
+        // Доверяем полосе, только если видели, как она растёт с небольшого значения:
+        // на экране бывают и другие «полосы», которые всегда стоят на максимуме.
+        if (firstProgress < 0) firstProgress = v;
+        if (!progressSeen && firstProgress < 0.9f && v > firstProgress + 0.02f) {
+            progressSeen = true;
+            Journal.add("Нашёл полосу прогресса ролика");
+        }
+        long watched = SystemClock.elapsedRealtime() - reelStart;
+        boolean ended = progressSeen && watched > 4000 && (v >= 0.985f || (prevProgress > 0.8f && v < 0.2f));
         prevProgress = v;
         return ended;
     }

@@ -1,6 +1,6 @@
 {
- "versionCode": 6,
- "versionName": "1.5",
+ "versionCode": 7,
+ "versionName": "1.6",
  "apk": "ReelPilot.apk",
- "notes": "Кнопка комментариев ищется по точному названию в Instagram"
+ "notes": "Исправлено: листал каждые 1,5 секунды из-за ложной полосы прогресса"
 }
